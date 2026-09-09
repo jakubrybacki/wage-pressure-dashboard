@@ -1,0 +1,961 @@
+---
+title: "Wage Pressure Tracker"
+subtitle: "Tracking Wage and Labor Cost Pressures via Search Big Data Across Europe"
+format:
+  dashboard:
+    theme:
+      - flatly
+      - theme.scss
+    css: styles.css
+    include-after-body: export_script.html
+    orientation: rows
+    scrolling: true
+    embed-resources: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+
+library(plotly)
+library(dplyr)
+library(tidyr)
+library(readr)
+library(htmltools)
+library(DT)
+library(jsonlite)
+library(bigrquery)
+library(lubridate)
+
+# BigQuery Configuration
+options(gargle_oauth_email = TRUE)
+project <- "macroeconomic-dashboards"
+dataset <- "Disinflation_dashboard"
+
+# Looker Studio Core Color Palette
+col_pink     <- "#d6498b"
+col_yellow   <- "#fec44f"
+col_orange   <- "#fe9929"
+col_seledyn  <- "#41b6c4"
+col_green    <- "#2ca25f"
+col_purple   <- "#6a1b9a"
+col_line     <- "#111111"
+
+# Country codes, names, and distinct Looker Studio colors
+country_codes <- c("PL", "DE", "ES", "NL", "FR", "IT")
+country_names <- c("Poland", "Germany", "Spain", "Netherlands", "France", "Italy")
+country_flags <- c("PL" = "🇵🇱", "DE" = "🇩🇪", "ES" = "🇪🇸", "NL" = "🇳🇱", "FR" = "🇫🇷", "IT" = "🇮🇹")
+
+country_colors <- c(
+  "PL" = "#d6498b", # Magenta / Pink
+  "DE" = "#fec44f", # Warm Amber / Yellow
+  "ES" = "#fe9929", # Orange
+  "NL" = "#41b6c4", # Teal / Cyan
+  "FR" = "#2ca25f", # Green
+  "IT" = "#6a1b9a"  # Purple / Indigo
+)
+
+palette_components <- c("#d6498b", "#fec44f", "#fe9929", "#41b6c4")
+
+# Data fetcher: tries Google BigQuery first, falls back to local precomputed CSVs
+fetch_wage_pressure_data <- function() {
+  tryCatch({
+    bq_auth(email = TRUE)
+    
+    # 1. PCA Indices
+    sql_pca <- paste0("SELECT date, geo, country, pca_raw, wage_pressure_index, wage_pressure_ma3m, wage_pressure_ma12m FROM `", 
+                      project, ".", dataset, ".wage_spiral_pca_indices`")
+    tb_pca <- bq_project_query(project, sql_pca)
+    df_indices <- bq_table_download(tb_pca) %>%
+      mutate(date = as.Date(date)) %>%
+      arrange(geo, date)
+      
+    # 2. Components
+    sql_comp <- paste0("SELECT date, country, geo, term, interest FROM `", 
+                       project, ".", dataset, ".wage_spiral_tracker_long`")
+    tb_comp <- bq_project_query(project, sql_comp)
+    df_comp <- bq_table_download(tb_comp) %>%
+      rename(Date = date, Country = country, Geo = geo, Term = term, Interest = interest) %>%
+      mutate(Date = as.Date(Date)) %>%
+      arrange(Geo, Term, Date)
+
+    # 3. Loadings from local fallback (or derived)
+    df_load <- if (file.exists("wage_spiral_pca_loadings.csv")) {
+      read_csv("wage_spiral_pca_loadings.csv", show_col_types = FALSE)
+    } else {
+      data.frame()
+    }
+    
+    # Update local caches
+    tryCatch({
+      write_csv(df_indices, "wage_spiral_pca_indices.csv")
+      write_csv(df_comp, "wage_spiral_tracker_long.csv")
+    }, error = function(e) {})
+    
+    list(indices = df_indices, components = df_comp, loadings = df_load)
+  }, error = function(e) {
+    message("Notice: BigQuery connection skipped (", e$message, "). Using local verified cache.")
+    df_indices <- read_csv("wage_spiral_pca_indices.csv", show_col_types = FALSE) %>%
+      mutate(date = as.Date(date))
+    df_comp <- read_csv("wage_spiral_tracker_long.csv", show_col_types = FALSE) %>%
+      mutate(Date = as.Date(Date))
+    df_load <- read_csv("wage_spiral_pca_loadings.csv", show_col_types = FALSE)
+    list(indices = df_indices, components = df_comp, loadings = df_load)
+  })
+}
+
+data_pack <- fetch_wage_pressure_data()
+df_ind   <- data_pack$indices
+df_comp  <- data_pack$components
+df_load  <- data_pack$loadings
+
+# Load or calculate country statistics
+stats_json_path <- "country_latest_stats.json"
+if (file.exists(stats_json_path)) {
+  stats_data <- jsonlite::fromJSON(stats_json_path)
+} else {
+  stats_data <- list()
+}
+
+# Precompute PCA loadings JSON for dynamic Plotly restyle (eliminates empty columns across countries)
+pca_loadings_list <- list()
+for (g in country_codes) {
+  df_sub_load <- df_load %>% filter(geo == g) %>% arrange(desc(pca_loading))
+  c_name <- country_names[which(country_codes == g)]
+  terms_wrapped <- gsub(" \\+ ", "<br>+ ", df_sub_load$term)
+  c_col <- unname(country_colors[g])
+  colors <- rep(c_col, nrow(df_sub_load))
+  hover <- paste0("<b>Query:</b> ", df_sub_load$term,
+                  "<br><b>PCA Loading:</b> ", sprintf("%+.3f", df_sub_load$pca_loading),
+                  "<br><b>Variance Explained:</b> ", df_sub_load$var_explained_pct, "%")
+  
+  pca_loadings_list[[g]] <- list(
+    geo = g,
+    country = c_name,
+    terms = df_sub_load$term,
+    terms_display = terms_wrapped,
+    loadings = round(as.numeric(df_sub_load$pca_loading), 4),
+    var_explained = as.numeric(unique(df_sub_load$var_explained_pct)[1]),
+    colors = colors,
+    hover = hover
+  )
+}
+pca_loadings_json <- jsonlite::toJSON(pca_loadings_list, auto_unbox = TRUE)
+
+# Helper function to generate clean 4-column factor loading charts by country
+create_country_loading_plot <- function(geo_code) {
+  df_sub <- df_load %>% 
+    filter(geo == geo_code) %>% 
+    arrange(desc(pca_loading)) %>%
+    mutate(term_wrapped = gsub(" \\+ ", "<br>+ ", term))
+  
+  c_name <- country_names[which(country_codes == geo_code)]
+  var_exp <- df_sub$var_explained_pct[1]
+  c_col <- unname(country_colors[geo_code])
+  bar_colors <- rep(c_col, nrow(df_sub))
+  
+  plot_ly(
+    data = df_sub,
+    x = ~term_wrapped,
+    y = ~pca_loading,
+    type = 'bar',
+    width = 0.42,
+    marker = list(
+      color = bar_colors,
+      line = list(color = "#0f172a", width = 1)
+    ),
+    showlegend = FALSE,
+    hoverinfo = 'text',
+    text = ~paste0("<b>", c_name, " (", geo_code, "):</b> ", term,
+                  "<br><b>PCA Loading:</b> ", sprintf("%+.3f", pca_loading),
+                  "<br><b>Explained Variance:</b> ", var_exp, "%"),
+    texttemplate = '%{y:+.2f}',
+    textposition = 'outside',
+    textfont = list(size = 12.5, color = "#0f172a", face = "bold")
+  ) %>% layout(
+    xaxis = list(
+      title = "",
+      categoryorder = 'array',
+      categoryarray = df_sub$term_wrapped,
+      tickfont = list(size = 11, color = "#1e293b")
+    ),
+    yaxis = list(
+      title = list(text = "Factor Loading (PC1)", font = list(size = 12.5)),
+      range = c(-0.45, 0.85),
+      showgrid = TRUE,
+      gridcolor = "#f0f0f0",
+      zeroline = TRUE,
+      zerolinecolor = "#64748b",
+      zerolinewidth = 2
+    ),
+    margin = list(l = 50, r = 20, t = 30, b = 75, autoexpand = FALSE)
+  ) %>%
+  config(responsive = TRUE, displayModeBar = FALSE)
+}
+
+latest_date_str <- format(max(df_ind$date, na.rm = TRUE), "%B %Y")
+earliest_date_str <- format(min(df_ind$date, na.rm = TRUE), "%Y")
+```
+
+```{=html}
+<script>
+  window.countryStatsData = `r if (file.exists("country_latest_stats.json")) readLines("country_latest_stats.json", warn=FALSE) else "{}"`;
+  window.pcaLoadingsData = `r pca_loadings_json`;
+</script>
+```
+
+# European Overview {icon="globe-europe"}
+
+## Row {height=600px}
+
+### Wage Pressure Across Major European Economies (Index) {width=100%}
+
+::: {.chart-subtitle style="margin-bottom: 6px; color: #555555; font-size: 0.92rem;"}
+Synthetic PCA index (0–100) based on Google Trends search queries, seasonally adjusted via STL
+:::
+
+```{r chart_cross_country_comparison}
+# Main Cross-Country Comparison Chart (Fulfilling Looker Studio PDF Page 1)
+p_main <- plot_ly()
+
+# 1. 12-Month Moving Average Trend (Default - Active)
+for (g in country_codes) {
+  df_g <- df_ind %>% filter(geo == g) %>% arrange(date)
+  c_name <- country_names[which(country_codes == g)]
+  col <- country_colors[g]
+  
+  p_main <- p_main %>% add_trace(
+    data = df_g, x = ~date, y = ~wage_pressure_ma12m,
+    type = 'scatter', mode = 'lines',
+    name = c_name,
+    line = list(color = col, width = 2.6),
+    visible = TRUE,
+    legendgroup = g,
+    hoverinfo = 'text',
+    text = ~paste0("<b>", c_name, " (", g, ")</b>",
+                  "<br><b>Period:</b> ", format(date, "%B %Y"),
+                  "<br><b>Wage Pressure (MA 12M):</b> ", sprintf("%.1f", wage_pressure_ma12m), " / 100",
+                  "<br><b>Short-term (MA 3M):</b> ", sprintf("%.1f", wage_pressure_ma3m),
+                  "<br><b>Monthly SA:</b> ", sprintf("%.1f", wage_pressure_index))
+  )
+}
+
+# 2. 3-Month Moving Average Momentum (Visible via switcher)
+for (g in country_codes) {
+  df_g <- df_ind %>% filter(geo == g) %>% arrange(date)
+  c_name <- country_names[which(country_codes == g)]
+  col <- country_colors[g]
+  
+  p_main <- p_main %>% add_trace(
+    data = df_g, x = ~date, y = ~wage_pressure_ma3m,
+    type = 'scatter', mode = 'lines',
+    name = paste0(c_name, " (MA 3M)"),
+    line = list(color = col, width = 2.0, dash = 'dot'),
+    visible = FALSE,
+    legendgroup = g,
+    showlegend = FALSE,
+    hoverinfo = 'text',
+    text = ~paste0("<b>", c_name, " (MA 3M)</b>",
+                  "<br><b>Period:</b> ", format(date, "%B %Y"),
+                  "<br><b>Momentum (MA 3M):</b> ", sprintf("%.1f", wage_pressure_ma3m), " / 100")
+  )
+}
+
+# 3. Monthly DeseSeasonalized Index (Visible via switcher)
+for (g in country_codes) {
+  df_g <- df_ind %>% filter(geo == g) %>% arrange(date)
+  c_name <- country_names[which(country_codes == g)]
+  col <- country_colors[g]
+  
+  p_main <- p_main %>% add_trace(
+    data = df_g, x = ~date, y = ~wage_pressure_index,
+    type = 'scatter', mode = 'lines',
+    name = paste0(c_name, " (Monthly SA)"),
+    line = list(color = col, width = 1.2, dash = 'dash'),
+    visible = FALSE,
+    legendgroup = g,
+    showlegend = FALSE,
+    hoverinfo = 'text',
+    text = ~paste0("<b>", c_name, " (Monthly SA)</b>",
+                  "<br><b>Period:</b> ", format(date, "%B %Y"),
+                  "<br><b>Monthly SA Index:</b> ", sprintf("%.1f", wage_pressure_index), " / 100")
+  )
+}
+
+n_countries <- length(country_codes)
+vis_ma12 <- c(rep(TRUE, n_countries),  rep(FALSE, n_countries), rep(FALSE, n_countries))
+vis_ma3  <- c(rep(FALSE, n_countries), rep(TRUE, n_countries),  rep(FALSE, n_countries))
+vis_raw  <- c(rep(FALSE, n_countries), rep(FALSE, n_countries), rep(TRUE, n_countries))
+
+p_main <- p_main %>% layout(
+  xaxis = list(
+    title = "",
+    dtick = "M24",
+    tickformat = "%Y",
+    showgrid = FALSE,
+    tickfont = list(size = 13, color = "#222222"),
+    rangeselector = list(
+      buttons = list(
+        list(count = 3, label = "3Y", step = "year", stepmode = "backward"),
+        list(count = 5, label = "5Y", step = "year", stepmode = "backward"),
+        list(count = 10, label = "10Y", step = "year", stepmode = "backward"),
+        list(step = "all", label = "All Time")
+      ),
+      x = 0.70, y = 1.15,
+      yanchor = "bottom",
+      bgcolor = "#f1f5f9",
+      activecolor = "#fec44f"
+    )
+  ),
+  yaxis = list(
+    title = list(text = "Wage Pressure Index (0–100)", font = list(size = 14, color = "#111111")),
+    range = c(-2, 105),
+    showgrid = TRUE,
+    gridcolor = "#f0f0f0",
+    tickfont = list(size = 13, color = "#222222")
+  ),
+  margin = list(l = 50, r = 25, t = 80, b = 40, autoexpand = FALSE),
+  legend = list(
+    orientation = "h",
+    x = 0.01, y = 1.01,
+    yanchor = "bottom",
+    font = list(size = 12.5, color = "#1e293b"),
+    bgcolor = "rgba(255, 255, 255, 0.9)"
+  ),
+  updatemenus = list(
+    list(
+      type = "dropdown",
+      active = 0,
+      x = 0.01, y = 1.15,
+      xanchor = "left", yanchor = "bottom",
+      direction = "down",
+      pad = list(r = 10, t = 2, b = 2),
+      buttons = list(
+        list(method = "restyle", args = list("visible", vis_ma12), label = "Smoothing: 12-Month Trend (MA 12M)"),
+        list(method = "restyle", args = list("visible", vis_ma3),  label = "Smoothing: 3-Month Momentum (MA 3M)"),
+        list(method = "restyle", args = list("visible", vis_raw),  label = "Smoothing: Monthly SA Index (Raw)")
+      )
+    )
+  ),
+  hovermode = 'x unified',
+  hoverlabel = list(font = list(size = 13))
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_main
+```
+
+## Row {height=420px}
+
+### Cross-Country Wage Pressure Benchmarking Table {width=100%}
+
+```{r table_cross_country}
+summary_table_data <- data.frame(
+  Flag = sapply(country_codes, function(g) country_flags[g]),
+  Country = country_names,
+  Code = country_codes,
+  Current_Level = sapply(country_codes, function(g) stats_data[[g]]$current_ma12),
+  YoY_Change = sapply(country_codes, function(g) stats_data[[g]]$yoy_change),
+  Change_3Y = sapply(country_codes, function(g) stats_data[[g]]$change_3y),
+  Historical_Peak = sapply(country_codes, function(g) stats_data[[g]]$peak_value),
+  Peak_Period = sapply(country_codes, function(g) stats_data[[g]]$peak_period),
+  Explained_Variance = sapply(country_codes, function(g) paste0(stats_data[[g]]$var_explained, "%")),
+  Status = sapply(country_codes, function(g) stats_data[[g]]$status),
+  stringsAsFactors = FALSE
+) %>%
+arrange(desc(Current_Level))
+
+datatable(
+  summary_table_data,
+  rownames = FALSE,
+  colnames = c(" ", "Country", "ISO", "Latest Level (0–100)", "1-Year YoY (pts)", "3-Year Trend (pts)", "All-Time Peak", "Peak Date", "PCA Variance Explained", "Pressure Status"),
+  options = list(
+    pageLength = 6,
+    dom = 't',
+    ordering = TRUE,
+    paging = FALSE,
+    searching = FALSE,
+    info = FALSE,
+    autoWidth = FALSE,
+    columnDefs = list(
+      list(className = 'dt-center', targets = c(0, 2, 7, 8, 9)),
+      list(className = 'dt-right', targets = c(3, 4, 5, 6))
+    )
+  )
+) %>%
+formatStyle(
+  'Current_Level',
+  background = styleColorBar(c(0, 100), '#fec44f'),
+  backgroundSize = '95% 70%',
+  backgroundRepeat = 'no-repeat',
+  backgroundPosition = 'center'
+) %>%
+formatStyle(
+  'YoY_Change',
+  color = styleInterval(0, c('#059669', '#d97706')),
+  fontWeight = 'bold'
+)
+```
+
+# Germany & France {icon="diagram-2"}
+
+## Row {height=520px}
+
+### Germany - Components Breakdown {width=100%}
+
+```{r chart_germany_components}
+# Germany Components (Corrected from draft Looker Studio slide)
+df_de <- df_comp %>% filter(Geo == "DE") %>% arrange(Date)
+terms_de <- unique(df_de$Term)
+
+p_de <- plot_ly()
+for (i in seq_along(terms_de)) {
+  t <- terms_de[i]
+  sub_t <- df_de %>% filter(Term == t)
+  col <- palette_components[(i - 1) %% length(palette_components) + 1]
+  
+  p_de <- p_de %>% add_trace(
+    data = sub_t, x = ~Date, y = ~Interest,
+    type = 'scatter', mode = 'lines',
+    name = t,
+    line = list(color = col, width = 2.2),
+    hoverinfo = 'text',
+    text = ~paste0("<b>Germany: ", t, "</b>",
+                  "<br><b>Period:</b> ", format(Date, "%B %Y"),
+                  "<br><b>Intensity (SA 0–100):</b> ", sprintf("%.1f", Interest))
+  )
+}
+
+p_de <- p_de %>% layout(
+  title = list(
+    text = "<b>Germany — Deseasonalized Components (Google Trends SA Index 0–100)</b><br><span style='font-size:13px;color:#555555;'>Underlying collective bargaining, salary negotiation, and minimum wage search terms</span>",
+    font = list(size = 15, color = "#111111"),
+    x = 0.01, y = 1.18,
+    yanchor = "top"
+  ),
+  xaxis = list(title = "", dtick = "M24", tickformat = "%Y", showgrid = FALSE, tickfont = list(size = 13, color = "#222222")),
+  yaxis = list(title = list(text = "Normalized Intensity (0–100)", font = list(size = 13.5)), range = c(-2, 105), showgrid = TRUE, gridcolor = "#f0f0f0"),
+  margin = list(l = 50, r = 25, t = 115, b = 40, autoexpand = FALSE),
+  legend = list(orientation = "h", x = 0.01, y = 1.02, yanchor = "bottom", font = list(size = 11.5)),
+  hovermode = 'x unified'
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_de
+```
+
+## Row {height=520px}
+
+### France - Components Breakdown {width=100%}
+
+```{r chart_france_components}
+df_fr <- df_comp %>% filter(Geo == "FR") %>% arrange(Date)
+terms_fr <- unique(df_fr$Term)
+
+p_fr <- plot_ly()
+for (i in seq_along(terms_fr)) {
+  t <- terms_fr[i]
+  sub_t <- df_fr %>% filter(Term == t)
+  col <- palette_components[(i - 1) %% length(palette_components) + 1]
+  
+  p_fr <- p_fr %>% add_trace(
+    data = sub_t, x = ~Date, y = ~Interest,
+    type = 'scatter', mode = 'lines',
+    name = t,
+    line = list(color = col, width = 2.2),
+    hoverinfo = 'text',
+    text = ~paste0("<b>France: ", t, "</b>",
+                  "<br><b>Period:</b> ", format(Date, "%B %Y"),
+                  "<br><b>Intensity (SA 0–100):</b> ", sprintf("%.1f", Interest))
+  )
+}
+
+p_fr <- p_fr %>% layout(
+  title = list(
+    text = "<b>France — Deseasonalized Components (Google Trends SA Index 0–100)</b><br><span style='font-size:13px;color:#555555;'>Underlying NAO, SMIC, and salary revaluation search queries</span>",
+    font = list(size = 15, color = "#111111"),
+    x = 0.01, y = 1.18,
+    yanchor = "top"
+  ),
+  xaxis = list(title = "", dtick = "M24", tickformat = "%Y", showgrid = FALSE, tickfont = list(size = 13, color = "#222222")),
+  yaxis = list(title = list(text = "Normalized Intensity (0–100)", font = list(size = 13.5)), range = c(-2, 105), showgrid = TRUE, gridcolor = "#f0f0f0"),
+  margin = list(l = 50, r = 25, t = 115, b = 40, autoexpand = FALSE),
+  legend = list(orientation = "h", x = 0.01, y = 1.02, yanchor = "bottom", font = list(size = 11.5)),
+  hovermode = 'x unified'
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_fr
+```
+
+# Netherlands & Italy {icon="diagram-3"}
+
+## Row {height=520px}
+
+### Netherlands - Components Breakdown {width=100%}
+
+```{r chart_netherlands_components}
+df_nl <- df_comp %>% filter(Geo == "NL") %>% arrange(Date)
+terms_nl <- unique(df_nl$Term)
+
+p_nl <- plot_ly()
+for (i in seq_along(terms_nl)) {
+  t <- terms_nl[i]
+  sub_t <- df_nl %>% filter(Term == t)
+  col <- palette_components[(i - 1) %% length(palette_components) + 1]
+  
+  p_nl <- p_nl %>% add_trace(
+    data = sub_t, x = ~Date, y = ~Interest,
+    type = 'scatter', mode = 'lines',
+    name = t,
+    line = list(color = col, width = 2.2),
+    hoverinfo = 'text',
+    text = ~paste0("<b>Netherlands: ", t, "</b>",
+                  "<br><b>Period:</b> ", format(Date, "%B %Y"),
+                  "<br><b>Intensity (SA 0–100):</b> ", sprintf("%.1f", Interest))
+  )
+}
+
+p_nl <- p_nl %>% layout(
+  title = list(
+    text = "<b>Netherlands — Deseasonalized Components (Google Trends SA Index 0–100)</b><br><span style='font-size:13px;color:#555555;'>Underlying CAO negotiations, loonstijging, and minimumloon search terms</span>",
+    font = list(size = 15, color = "#111111"),
+    x = 0.01, y = 1.18,
+    yanchor = "top"
+  ),
+  xaxis = list(title = "", dtick = "M24", tickformat = "%Y", showgrid = FALSE, tickfont = list(size = 13, color = "#222222")),
+  yaxis = list(title = list(text = "Normalized Intensity (0–100)", font = list(size = 13.5)), range = c(-2, 105), showgrid = TRUE, gridcolor = "#f0f0f0"),
+  margin = list(l = 50, r = 25, t = 115, b = 40, autoexpand = FALSE),
+  legend = list(orientation = "h", x = 0.01, y = 1.02, yanchor = "bottom", font = list(size = 11.5)),
+  hovermode = 'x unified'
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_nl
+```
+
+## Row {height=520px}
+
+### Italy - Components Breakdown {width=100%}
+
+```{r chart_italy_components}
+df_it <- df_comp %>% filter(Geo == "IT") %>% arrange(Date)
+terms_it <- unique(df_it$Term)
+
+p_it <- plot_ly()
+for (i in seq_along(terms_it)) {
+  t <- terms_it[i]
+  sub_t <- df_it %>% filter(Term == t)
+  col <- palette_components[(i - 1) %% length(palette_components) + 1]
+  
+  p_it <- p_it %>% add_trace(
+    data = sub_t, x = ~Date, y = ~Interest,
+    type = 'scatter', mode = 'lines',
+    name = t,
+    line = list(color = col, width = 2.2),
+    hoverinfo = 'text',
+    text = ~paste0("<b>Italy: ", t, "</b>",
+                  "<br><b>Period:</b> ", format(Date, "%B %Y"),
+                  "<br><b>Intensity (SA 0–100):</b> ", sprintf("%.1f", Interest))
+  )
+}
+
+p_it <- p_it %>% layout(
+  title = list(
+    text = "<b>Italy — Deseasonalized Components (Google Trends SA Index 0–100)</b><br><span style='font-size:13px;color:#555555;'>Underlying CCNL renewals, aumento stipendio, and adeguamento salariale queries</span>",
+    font = list(size = 15, color = "#111111"),
+    x = 0.01, y = 1.18,
+    yanchor = "top"
+  ),
+  xaxis = list(title = "", dtick = "M24", tickformat = "%Y", showgrid = FALSE, tickfont = list(size = 13, color = "#222222")),
+  yaxis = list(title = list(text = "Normalized Intensity (0–100)", font = list(size = 13.5)), range = c(-2, 105), showgrid = TRUE, gridcolor = "#f0f0f0"),
+  margin = list(l = 50, r = 25, t = 115, b = 40, autoexpand = FALSE),
+  legend = list(orientation = "h", x = 0.01, y = 1.02, yanchor = "bottom", font = list(size = 11.5)),
+  hovermode = 'x unified'
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_it
+```
+
+# Spain & Poland {icon="diagram-3-fill"}
+
+## Row {height=520px}
+
+### Spain - Components Breakdown {width=100%}
+
+```{r chart_spain_components}
+df_es <- df_comp %>% filter(Geo == "ES") %>% arrange(Date)
+terms_es <- unique(df_es$Term)
+
+p_es <- plot_ly()
+for (i in seq_along(terms_es)) {
+  t <- terms_es[i]
+  sub_t <- df_es %>% filter(Term == t)
+  col <- palette_components[(i - 1) %% length(palette_components) + 1]
+  
+  p_es <- p_es %>% add_trace(
+    data = sub_t, x = ~Date, y = ~Interest,
+    type = 'scatter', mode = 'lines',
+    name = t,
+    line = list(color = col, width = 2.2),
+    hoverinfo = 'text',
+    text = ~paste0("<b>Spain: ", t, "</b>",
+                  "<br><b>Period:</b> ", format(Date, "%B %Y"),
+                  "<br><b>Intensity (SA 0–100):</b> ", sprintf("%.1f", Interest))
+  )
+}
+
+p_es <- p_es %>% layout(
+  title = list(
+    text = "<b>Spain — Deseasonalized Components (Google Trends SA Index 0–100)</b><br><span style='font-size:13px;color:#555555;'>Underlying convenio colectivo, subida SMI, and revisión salarial queries</span>",
+    font = list(size = 15, color = "#111111"),
+    x = 0.01, y = 1.18,
+    yanchor = "top"
+  ),
+  xaxis = list(title = "", dtick = "M24", tickformat = "%Y", showgrid = FALSE, tickfont = list(size = 13, color = "#222222")),
+  yaxis = list(title = list(text = "Normalized Intensity (0–100)", font = list(size = 13.5)), range = c(-2, 105), showgrid = TRUE, gridcolor = "#f0f0f0"),
+  margin = list(l = 50, r = 25, t = 115, b = 40, autoexpand = FALSE),
+  legend = list(orientation = "h", x = 0.01, y = 1.02, yanchor = "bottom", font = list(size = 11.5)),
+  hovermode = 'x unified'
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_es
+```
+
+## Row {height=520px}
+
+### Poland - Components Breakdown {width=100%}
+
+```{r chart_poland_components}
+df_pl <- df_comp %>% filter(Geo == "PL") %>% arrange(Date)
+terms_pl <- unique(df_pl$Term)
+
+p_pl <- plot_ly()
+for (i in seq_along(terms_pl)) {
+  t <- terms_pl[i]
+  sub_t <- df_pl %>% filter(Term == t)
+  col <- palette_components[(i - 1) %% length(palette_components) + 1]
+  
+  p_pl <- p_pl %>% add_trace(
+    data = sub_t, x = ~Date, y = ~Interest,
+    type = 'scatter', mode = 'lines',
+    name = t,
+    line = list(color = col, width = 2.2),
+    hoverinfo = 'text',
+    text = ~paste0("<b>Poland: ", t, "</b>",
+                  "<br><b>Period:</b> ", format(Date, "%B %Y"),
+                  "<br><b>Intensity (SA 0–100):</b> ", sprintf("%.1f", Interest))
+  )
+}
+
+p_pl <- p_pl %>% layout(
+  title = list(
+    text = "<b>Poland — Deseasonalized Components (Google Trends SA Index 0–100)</b><br><span style='font-size:13px;color:#555555;'>Underlying podwyżka płacy, negocjacja pensji, and kalkulator wynagrodzeń queries</span>",
+    font = list(size = 15, color = "#111111"),
+    x = 0.01, y = 1.18,
+    yanchor = "top"
+  ),
+  xaxis = list(title = "", dtick = "M24", tickformat = "%Y", showgrid = FALSE, tickfont = list(size = 13, color = "#222222")),
+  yaxis = list(title = list(text = "Normalized Intensity (0–100)", font = list(size = 13.5)), range = c(-2, 105), showgrid = TRUE, gridcolor = "#f0f0f0"),
+  margin = list(l = 50, r = 25, t = 115, b = 40, autoexpand = FALSE),
+  legend = list(orientation = "h", x = 0.01, y = 1.02, yanchor = "bottom", font = list(size = 11.5)),
+  hovermode = 'x unified'
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_pl
+```
+
+# Country Explorer {icon="search"}
+
+## Row {height=130px}
+
+```{r country_explorer_controls}
+# Native Country Selector Component
+tags$div(
+  class = "country-filter-card",
+  tags$div(
+    class = "country-filter-content",
+    tags$label(
+      class = "country-filter-label",
+      `for` = "select-country-explorer",
+      "Select an economy to explore its synthetic wage index, components, and PCA structure:"
+    ),
+    tags$div(
+      class = "country-select-box-wrapper",
+      tags$span(class = "country-select-prefix", "Economy:"),
+      tags$select(
+        id = "select-country-explorer",
+        class = "form-select country-native-select",
+        onchange = "window.onCountryExplorerChange(this.value)",
+        lapply(seq_along(country_codes), function(idx) {
+          code <- country_codes[idx]
+          name <- country_names[idx]
+          sel_attr <- if (code == "PL") "selected" else NULL
+          tags$option(value = code, selected = sel_attr, paste0(country_flags[code], " ", code, " - ", name))
+        })
+      )
+    )
+  )
+)
+```
+
+## Row {height=520px}
+
+### Synthetic Wage Pressure Index for Selected Economy {width=100%}
+
+```{r explorer_plot_index}
+# Multi-trace plot with all countries, toggled by JS
+p_exp_idx <- plot_ly()
+
+for (i in seq_along(country_codes)) {
+  g <- country_codes[i]
+  c_name <- country_names[i]
+  df_g <- df_ind %>% filter(geo == g) %>% arrange(date)
+  is_active <- (i == 1) # PL active by default
+  col_theme <- country_colors[g]
+  
+  # Trace 1: Raw monthly index
+  p_exp_idx <- p_exp_idx %>% add_trace(
+    data = df_g, x = ~date, y = ~wage_pressure_index,
+    type = 'scatter', mode = 'lines',
+    name = paste0(c_name, ' (Monthly SA)'),
+    line = list(color = '#94a3b8', width = 1.0, dash = 'solid'),
+    opacity = 0.55,
+    visible = is_active,
+    hoverinfo = 'text',
+    text = ~paste0("<b>", c_name, "</b>",
+                  "<br><b>Date:</b> ", format(date, "%B %Y"),
+                  "<br><b>Monthly SA Index:</b> ", sprintf("%.1f", wage_pressure_index))
+  )
+  
+  # Trace 2: MA 3M momentum
+  p_exp_idx <- p_exp_idx %>% add_trace(
+    data = df_g, x = ~date, y = ~wage_pressure_ma3m,
+    type = 'scatter', mode = 'lines',
+    name = paste0(c_name, ' (MA 3M)'),
+    line = list(color = '#0284c7', width = 1.8),
+    visible = is_active,
+    hoverinfo = 'text',
+    text = ~paste0("<b>", c_name, "</b>",
+                  "<br><b>Date:</b> ", format(date, "%B %Y"),
+                  "<br><b>Short-term (MA 3M):</b> ", sprintf("%.1f", wage_pressure_ma3m))
+  )
+  
+  # Trace 3: MA 12M trend with shaded area
+  p_exp_idx <- p_exp_idx %>% add_trace(
+    data = df_g, x = ~date, y = ~wage_pressure_ma12m,
+    type = 'scatter', mode = 'lines',
+    name = paste0(c_name, ' (MA 12M Trend)'),
+    line = list(color = col_theme, width = 2.8),
+    fill = 'tozeroy', fillcolor = paste0(col_theme, "22"),
+    visible = is_active,
+    hoverinfo = 'text',
+    text = ~paste0("<b>", c_name, "</b>",
+                  "<br><b>Date:</b> ", format(date, "%B %Y"),
+                  "<br><b>Wage Pressure Trend (MA 12M):</b> ", sprintf("%.1f", wage_pressure_ma12m))
+  )
+}
+
+p_exp_idx <- p_exp_idx %>% layout(
+  title = list(
+    text = "<b>Synthetic Wage Pressure Index: Monthly SA vs Moving Averages</b><br><span style='font-size:13px;color:#555555;'>Monthly deseasonalized index, 3-month momentum, and 12-month structural trend (0–100 scale)</span>",
+    font = list(size = 15, color = "#111111"),
+    x = 0.01, y = 1.18,
+    yanchor = "top"
+  ),
+  xaxis = list(title = "", dtick = "M24", tickformat = "%Y", showgrid = FALSE, tickfont = list(size = 13, color = "#222222")),
+  yaxis = list(title = list(text = "Index (0–100)", font = list(size = 13.5)), range = c(-2, 105), showgrid = TRUE, gridcolor = "#f0f0f0"),
+  margin = list(l = 50, r = 25, t = 115, b = 40, autoexpand = FALSE),
+  legend = list(orientation = "h", x = 0.01, y = 1.02, yanchor = "bottom", font = list(size = 12)),
+  hovermode = 'x unified'
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_exp_idx
+```
+
+## Row {height=500px}
+
+### Component Dynamics for Selected Economy {width=100%}
+
+```{r explorer_plot_components}
+p_exp_comp <- plot_ly()
+
+for (i in seq_along(country_codes)) {
+  g <- country_codes[i]
+  c_name <- country_names[i]
+  df_sub <- df_comp %>% filter(Geo == g) %>% arrange(Date)
+  terms <- unique(df_sub$Term)
+  is_active <- (i == 1)
+  
+  for (j in seq_along(terms)) {
+    t <- terms[j]
+    sub_t <- df_sub %>% filter(Term == t)
+    col <- palette_components[(j - 1) %% length(palette_components) + 1]
+    
+    p_exp_comp <- p_exp_comp %>% add_trace(
+      data = sub_t, x = ~Date, y = ~Interest,
+      type = 'scatter', mode = 'lines',
+      name = t,
+      line = list(color = col, width = 2.2),
+      visible = is_active,
+      hoverinfo = 'text',
+      text = ~paste0("<b>", t, "</b>",
+                    "<br><b>Period:</b> ", format(Date, "%B %Y"),
+                    "<br><b>Intensity (SA 0–100):</b> ", sprintf("%.1f", Interest))
+    )
+  }
+}
+
+p_exp_comp <- p_exp_comp %>% layout(
+  title = list(
+    text = "<b>Underlying Google Trends Search Components (SA 0–100)</b><br><span style='font-size:13px;color:#555555;'>Comparative time series of each individual search query pillar</span>",
+    font = list(size = 15, color = "#111111"),
+    x = 0.01, y = 1.18,
+    yanchor = "top"
+  ),
+  xaxis = list(title = "", dtick = "M24", tickformat = "%Y", showgrid = FALSE, tickfont = list(size = 13, color = "#222222")),
+  yaxis = list(title = list(text = "Normalized Intensity (0–100)", font = list(size = 13.5)), range = c(-2, 105), showgrid = TRUE, gridcolor = "#f0f0f0"),
+  margin = list(l = 50, r = 25, t = 115, b = 40, autoexpand = FALSE),
+  legend = list(orientation = "h", x = 0.01, y = 1.02, yanchor = "bottom", font = list(size = 11.5)),
+  hovermode = 'x unified'
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_exp_comp
+```
+
+## Row {height=450px}
+
+### PCA Factor Loadings (Component Weights) {width=100%}
+
+```{r explorer_plot_loadings}
+# Initial country is PL (Poland) - exactly 1 trace to avoid empty column slots
+init_geo <- "PL"
+df_init_load <- df_load %>% filter(geo == init_geo) %>% arrange(desc(pca_loading)) %>%
+  mutate(term_wrapped = gsub(" \\+ ", "<br>+ ", term))
+
+c_col_init <- unname(country_colors[init_geo])
+bar_colors_init <- rep(c_col_init, nrow(df_init_load))
+
+p_exp_load <- plot_ly(
+  data = df_init_load,
+  x = ~term_wrapped, y = ~pca_loading,
+  type = 'bar',
+  width = 0.45,
+  marker = list(
+    color = bar_colors_init,
+    line = list(color = "#0f172a", width = 1)
+  ),
+  showlegend = FALSE,
+  hoverinfo = 'text',
+  text = ~paste0("<b>Query:</b> ", term,
+                "<br><b>PCA Loading:</b> ", sprintf("%+.3f", pca_loading),
+                "<br><b>Variance Explained:</b> ", var_explained_pct, "%"),
+  texttemplate = '%{y:+.2f}',
+  textposition = 'outside',
+  textfont = list(size = 13, color = "#0f172a", face = "bold")
+) %>% layout(
+  title = list(
+    text = paste0("<b>PCA Factor Loadings — Poland (PC1 Weights)</b><br><span style='font-size:13px;color:#555555;'>Contribution of each search phrase to PC1 (", df_init_load$var_explained_pct[1], "% variance explained)</span>"),
+    font = list(size = 15, color = "#111111"),
+    x = 0.01, y = 1.16,
+    yanchor = "top"
+  ),
+  xaxis = list(
+    title = "",
+    categoryorder = 'array',
+    categoryarray = df_init_load$term_wrapped,
+    tickfont = list(size = 11.5, color = "#1e293b")
+  ),
+  yaxis = list(
+    title = list(text = "Factor Loading (Weight in PC1)", font = list(size = 13.5)),
+    range = c(-0.45, 0.85),
+    showgrid = TRUE,
+    gridcolor = "#f0f0f0",
+    zeroline = TRUE,
+    zerolinecolor = "#64748b",
+    zerolinewidth = 2
+  ),
+  margin = list(l = 55, r = 25, t = 95, b = 90, autoexpand = FALSE)
+) %>%
+config(responsive = TRUE, displayModeBar = FALSE)
+
+p_exp_load
+```
+
+# Methodology & PCA Weights {icon="info-circle"}
+
+## Row {height=420px}
+
+### 🇵🇱 Poland — Factor Loadings (88.2% Variance Explained) {width=50%}
+
+```{r chart_loadings_pl}
+create_country_loading_plot("PL")
+```
+
+### 🇩🇪 Germany — Factor Loadings (60.8% Variance Explained) {width=50%}
+
+```{r chart_loadings_de}
+create_country_loading_plot("DE")
+```
+
+## Row {height=420px}
+
+### 🇪🇸 Spain — Factor Loadings (71.7% Variance Explained) {width=50%}
+
+```{r chart_loadings_es}
+create_country_loading_plot("ES")
+```
+
+### 🇳🇱 Netherlands — Factor Loadings (93.4% Variance Explained) {width=50%}
+
+```{r chart_loadings_nl}
+create_country_loading_plot("NL")
+```
+
+## Row {height=420px}
+
+### 🇫🇷 France — Factor Loadings (72.2% Variance Explained) {width=50%}
+
+```{r chart_loadings_fr}
+create_country_loading_plot("FR")
+```
+
+### 🇮🇹 Italy — Factor Loadings (71.3% Variance Explained) {width=50%}
+
+```{r chart_loadings_it}
+create_country_loading_plot("IT")
+```
+
+## Row {height=580px}
+
+### Technical Methodology & Analytical Framework {width=100%}
+
+::: {.card-body .methodology-card}
+#### **Methodological Framework: Synthetic Wage Pressure Tracking via Search Big Data**
+
+1. **High-Frequency Big Data Ingestion**:
+   - Monthly Google Trends query volumes spanning from **January 2004 to August 2026** for 6 major European economies: Poland (`PL`), Germany (`DE`), Spain (`ES`), Netherlands (`NL`), France (`FR`), and Italy (`IT`).
+   - For each country, 4 representative query clusters are tracked covering:
+     - Collective bargaining and union wage agreements (e.g. *Tarifverhandlung*, *convenio colectivo*, *NAO salaire*, *rinnovo CCNL*, *CAO*).
+     - Direct salary raise and negotiation searches (e.g. *podwyżka pensji*, *Gehaltserhöhung*, *aumento stipendio*).
+     - Statutory minimum wage revaluation queries (e.g. *Mindestlohn*, *SMIC*, *subida SMI*, *minimumloon*).
+     - General earnings and compensation calculators.
+
+2. **Denoising & STL Seasonal Adjustment**:
+   - High-frequency sampling noise in Google Trends data is filtered using a 3-month center moving average.
+   - Seasonal calendar variation (e.g., recurring January/Q1 minimum wage adjustments) is decomposed using **STL (Seasonal and Trend decomposition using Loess)** with adaptive seasonal windows (`s.window = 7`).
+   - The seasonally adjusted components (SA) are smoothed with a 12-month moving average (MA 12M) to extract the underlying macroeconomic wage momentum.
+
+3. **Dimensionality Reduction via Principal Component Analysis (PCA)**:
+   - For each economy, the standardized component matrix is decomposed using PCA.
+   - The **first principal component (PC1)** explains between **60.8% and 93.4%** of total variance across the countries, validating a coherent common wage-pressure factor.
+   - PC1 is oriented positively with respect to labor cost demand and min-max scaled to an intuitive **0 to 100 index scale**.
+
+4. **Data Attribution & Cloud Architecture**:
+   - Underlying analytical tables are synchronized with **Google BigQuery** (`macroeconomic-dashboards.Disinflation_dashboard`).
+   - Developed as part of the ALK Macroeconomic Dashboards initiative.
+:::

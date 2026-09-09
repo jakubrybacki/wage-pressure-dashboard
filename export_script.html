@@ -1,0 +1,278 @@
+<script>
+(function() {
+  // 1. Universal Client-Side CSV Exporter
+  function initExportButtons() {
+    const plots = document.querySelectorAll('.js-plotly-plot');
+    plots.forEach(function(plotEl) {
+      const parent = plotEl.closest('.card-body') || plotEl.parentElement;
+      if (!parent || parent.querySelector('.btn-export-chart-csv')) return;
+      
+      const toolbar = document.createElement('div');
+      toolbar.className = 'chart-export-toolbar';
+      
+      const btn = document.createElement('button');
+      btn.className = 'btn-export-chart-csv';
+      btn.setAttribute('type', 'button');
+      btn.setAttribute('title', 'Download chart data as CSV');
+      btn.innerHTML = '<svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" fill="currentColor" viewBox="0 0 16 16"><path d="M.5 9.9a.5.5 0 0 1 .5.5v2.5a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-2.5a.5.5 0 0 1 1 0v2.5a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2v-2.5a.5.5 0 0 1 .5-.5z"/><path d="M7.646 11.854a.5.5 0 0 0 .708 0l3-3a.5.5 0 0 0-.708-.708L8.5 10.293V1.5a.5.5 0 0 0-1 0v8.793L5.354 8.146a.5.5 0 1 0-.708.708l3 3z"/></svg> CSV';
+      
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        exportChartToCSV(plotEl);
+      });
+      
+      toolbar.appendChild(btn);
+      parent.appendChild(toolbar);
+    });
+  }
+
+  function exportChartToCSV(plotEl) {
+    if (!plotEl || !plotEl.data) return;
+    
+    // Extract title for filename
+    let rawTitle = "wage_pressure_data";
+    const cardEl = plotEl.closest('.card');
+    if (cardEl && cardEl.querySelector('.card-header')) {
+      rawTitle = cardEl.querySelector('.card-header').innerText.replace(/<[^>]+>/g, '').trim();
+    } else if (plotEl.layout && plotEl.layout.title) {
+      const t = typeof plotEl.layout.title === 'string' ? plotEl.layout.title : (plotEl.layout.title.text || '');
+      rawTitle = t.replace(/<[^>]+>/g, '').trim() || "wage_pressure_data";
+    }
+    const cleanFilename = rawTitle.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') + '.csv';
+    
+    // Filter currently visible traces
+    const visibleTraces = (plotEl.data || []).filter(function(t) {
+      return t.visible === true || t.visible === undefined;
+    });
+    if (visibleTraces.length === 0) {
+      alert("No visible data in this chart to export.");
+      return;
+    }
+    
+    // Check trace types: Bar (Loadings) vs Time-Series Scatter
+    const isBar = visibleTraces.some(function(t) { return t.type === 'bar'; });
+    
+    if (isBar) {
+      // Bar / Column chart (PCA Loadings)
+      let rows = [["Term", "PCA_Loading"]];
+      visibleTraces.forEach(function(t) {
+        const isH = (t.orientation === 'h');
+        const terms = isH ? (t.y || []) : (t.x || []);
+        const loadings = isH ? (t.x || []) : (t.y || []);
+        for (let i = 0; i < terms.length; i++) {
+          const cleanTerm = String(terms[i] || '').replace(/<br>/g, ' ').replace(/<[^>]+>/g, '').trim();
+          rows.push([cleanTerm, loadings[i] !== undefined ? loadings[i] : '']);
+        }
+      });
+      triggerCSVDownload(rows, cleanFilename);
+      return;
+    }
+    
+    // Time-series Scatter / Line data
+    let allX = [];
+    visibleTraces.forEach(function(t) {
+      if (Array.isArray(t.x)) {
+        t.x.forEach(function(xVal) {
+          if (!allX.includes(xVal)) allX.push(xVal);
+        });
+      }
+    });
+    
+    allX.sort();
+    
+    let header = ["Date"];
+    visibleTraces.forEach(function(t, i) {
+      let name = t.name ? t.name.replace(/<[^>]+>/g, '').trim() : ('Series_' + (i + 1));
+      header.push(name);
+    });
+    
+    let rows = [header];
+    allX.forEach(function(xVal) {
+      let row = [xVal];
+      visibleTraces.forEach(function(t) {
+        if (Array.isArray(t.x) && Array.isArray(t.y)) {
+          const idx = t.x.indexOf(xVal);
+          row.push(idx !== -1 && t.y[idx] !== undefined && t.y[idx] !== null ? t.y[idx] : '');
+        } else {
+          row.push('');
+        }
+      });
+      rows.push(row);
+    });
+    
+    triggerCSVDownload(rows, cleanFilename);
+  }
+
+  function triggerCSVDownload(rows, filename) {
+    const csvContent = "\uFEFF" + rows.map(function(r) { 
+      return r.map(function(val) {
+        let str = String(val === null || val === undefined ? '' : val);
+        if (str.includes(',') || str.includes('"') || str.includes('\n')) {
+          return '"' + str.replace(/"/g, '""') + '"';
+        }
+        return str;
+      }).join(',');
+    }).join('\r\n');
+    
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function triggerPlotlyResize() {
+    document.querySelectorAll('.js-plotly-plot').forEach(function(p) {
+      if (window.Plotly && p.data) {
+        Plotly.Plots.resize(p);
+      }
+    });
+  }
+
+  // 2. Native Country Explorer Switcher
+  window.onCountryExplorerChange = function(geoCode) {
+    const plots = document.querySelectorAll('#country-explorer .js-plotly-plot');
+    if (!plots || plots.length === 0) return;
+    
+    const geos = ["PL", "DE", "ES", "NL", "FR", "IT"];
+    const geoIdx = geos.indexOf(geoCode);
+    if (geoIdx === -1) return;
+
+    // Plot 1: Synthetic Index (3 traces per country: Raw, MA3M, MA12M)
+    if (plots[0] && plots[0].data) {
+      const nTraces = 3;
+      const totalTraces = plots[0].data.length;
+      const startIdx = geoIdx * nTraces;
+      const endIdx = startIdx + nTraces;
+      const visVec = [];
+      for (let i = 0; i < totalTraces; i++) {
+        visVec.push(i >= startIdx && i < endIdx);
+      }
+      Plotly.restyle(plots[0], 'visible', visVec);
+    }
+
+    // Plot 2: Components (4 traces per country)
+    if (plots[1] && plots[1].data) {
+      const nTraces = 4;
+      const totalTraces = plots[1].data.length;
+      const startIdx = geoIdx * nTraces;
+      const endIdx = startIdx + nTraces;
+      const visVec = [];
+      for (let i = 0; i < totalTraces; i++) {
+        visVec.push(i >= startIdx && i < endIdx);
+      }
+      Plotly.restyle(plots[1], 'visible', visVec);
+    }
+
+    // Plot 3: PCA Loadings (Single dynamic trace - updates categories without blank slots!)
+    if (plots[2] && window.pcaLoadingsData && window.pcaLoadingsData[geoCode]) {
+      const ld = window.pcaLoadingsData[geoCode];
+      Plotly.restyle(plots[2], {
+        x: [ld.terms_display],
+        y: [ld.loadings],
+        'marker.color': [ld.colors],
+        text: [ld.hover],
+        texttemplate: '%{y:+.2f}'
+      }, [0]);
+
+      Plotly.relayout(plots[2], {
+        'xaxis.categoryorder': 'array',
+        'xaxis.categoryarray': ld.terms_display,
+        'title.text': '<b>PCA Factor Loadings — ' + ld.country + ' (PC1 Weights)</b><br><span style="font-size:13px;color:#555555;">Contribution of each search phrase to PC1 (' + ld.var_explained.toFixed(1) + '% variance explained)</span>'
+      });
+    }
+
+    // Update dynamic country scorecards if country stats JSON exists
+    if (window.countryStatsData && window.countryStatsData[geoCode]) {
+      const st = window.countryStatsData[geoCode];
+      const elMa12 = document.getElementById('card-explorer-ma12');
+      const elYoy = document.getElementById('card-explorer-yoy');
+      const elPeak = document.getElementById('card-explorer-peak');
+      const elVar = document.getElementById('card-explorer-var');
+      const elCountry = document.getElementById('card-explorer-country-name');
+      
+      if (elMa12) elMa12.innerText = st.current_ma12.toFixed(1);
+      if (elYoy) {
+        const sign = st.yoy_change > 0 ? '+' : '';
+        elYoy.innerText = sign + st.yoy_change.toFixed(1) + ' pts';
+        elYoy.className = 'scorecard-delta ' + (st.yoy_change > 0 ? 'delta-up' : 'delta-down');
+      }
+      if (elPeak) elPeak.innerText = st.peak_value.toFixed(1) + ' (' + st.peak_period + ')';
+      if (elVar) elVar.innerText = st.var_explained.toFixed(1) + '%';
+      if (elCountry) elCountry.innerText = st.country;
+    }
+  };
+
+  // 3. Document ready & navigation setup
+  document.addEventListener('DOMContentLoaded', function() {
+    initExportButtons();
+    setTimeout(triggerPlotlyResize, 250);
+  });
+  
+  window.addEventListener('load', function() {
+    initExportButtons();
+    setTimeout(triggerPlotlyResize, 250);
+    setTimeout(triggerPlotlyResize, 700);
+    setTimeout(triggerPlotlyResize, 1300);
+  });
+  
+  window.addEventListener('resize', triggerPlotlyResize);
+
+  // Navigation handlers (smooth mobile continuous scroll & auto-collapsing hamburger)
+  document.querySelectorAll('.navbar-nav .nav-link').forEach(function(link) {
+    link.addEventListener('click', function(e) {
+      if (window.innerWidth <= 768) {
+        const targetSelector = this.getAttribute('data-bs-target') || this.getAttribute('href');
+        if (targetSelector && targetSelector.startsWith('#')) {
+          e.preventDefault();
+
+          // Update active link styling
+          document.querySelectorAll('.navbar-nav .nav-link').forEach(function(l) {
+            l.classList.remove('active');
+            l.setAttribute('aria-selected', 'false');
+          });
+          this.classList.add('active');
+          this.setAttribute('aria-selected', 'true');
+
+          const targetEl = document.querySelector(targetSelector);
+          if (targetEl) {
+            // Collapse mobile navbar menu immediately
+            const navCollapse = document.getElementById('dashboard-collapse');
+            if (navCollapse && navCollapse.classList.contains('show')) {
+              navCollapse.classList.remove('show');
+              const toggler = document.querySelector('.navbar-toggler');
+              if (toggler) {
+                toggler.setAttribute('aria-expanded', 'false');
+                toggler.classList.add('collapsed');
+              }
+            }
+
+            // Smooth scroll with fixed navbar height compensation
+            setTimeout(function() {
+              const navEl = document.querySelector('.navbar');
+              const navHeight = navEl ? navEl.offsetHeight : 56;
+              const targetPos = targetEl.getBoundingClientRect().top + window.pageYOffset - navHeight - 12;
+
+              window.scrollTo({
+                top: Math.max(0, targetPos),
+                behavior: 'smooth'
+              });
+            }, 60);
+          }
+        }
+      }
+
+      setTimeout(initExportButtons, 150);
+      setTimeout(triggerPlotlyResize, 250);
+      setTimeout(triggerPlotlyResize, 500);
+    });
+  });
+
+  setInterval(initExportButtons, 1500);
+})();
+</script>

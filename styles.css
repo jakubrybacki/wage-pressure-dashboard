@@ -1,0 +1,569 @@
+/* Custom styling for Wage Pressure Tracker Quarto Dashboard */
+/* Adheres to Looker Studio Theme & .agents/skills/dashboard-standards */
+
+:root {
+  --color-pink: #d6498b;
+  --color-yellow: #fec44f;
+  --color-orange: #fe9929;
+  --color-seledyn: #41b6c4;
+  --color-green: #2ca25f;
+  --color-purple: #6a1b9a;
+  --color-line: #111111;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  background-color: #f8f9fa;
+  font-size: 16px;
+  color: #212529;
+}
+
+/* Navbar styling */
+.navbar-brand {
+  font-size: 1.5rem !important;
+  font-weight: 700 !important;
+}
+
+.navbar .nav-link {
+  font-size: 1.15rem !important;
+  font-weight: 600 !important;
+  padding: 0.6rem 1.05rem !important;
+}
+
+/* Card layout & typography */
+.card {
+  border-radius: 10px;
+  border: 1px solid #dcdfe6;
+  box-shadow: 0 0.2rem 0.9rem 0 rgba(58, 59, 69, 0.07);
+  margin-bottom: 1.5rem;
+  background: #ffffff;
+}
+
+.card-header {
+  position: relative;
+  font-weight: 700;
+  background-color: #ffffff;
+  border-bottom: 1px solid #eaedf3;
+  color: #1a202c;
+  font-size: 1.25rem !important;
+  padding: 0.9rem 1.25rem;
+  padding-right: 95px !important; /* Prevents title collisions with top-right actions */
+}
+
+.card-body {
+  padding: 1.15rem 1.25rem 0.75rem 1.25rem;
+  overflow: visible !important;
+}
+
+.chart-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: #111111;
+  margin-bottom: 0.25rem;
+  line-height: 1.35;
+}
+
+.chart-subtitle {
+  font-size: 0.92rem;
+  font-weight: 400;
+  color: #555555;
+  display: inline-block;
+  margin-top: 2px;
+}
+
+/* Status pills bar on European Overview (Name + Flag + Status badge, no numbers) */
+.status-pills-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  width: 100%;
+  margin-bottom: 0.5rem;
+}
+
+.status-pill-item {
+  background: #ffffff;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 8px;
+  padding: 9px 15px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  display: inline-flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex: 1 1 140px;
+  min-height: 42px;
+  transition: transform 0.12s ease, border-color 0.12s ease;
+}
+
+.status-pill-item:hover {
+  transform: translateY(-1px);
+  border-color: #94a3b8;
+}
+
+.status-pill-country {
+  font-weight: 700;
+  font-size: 0.96rem;
+  color: #1e293b;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  white-space: nowrap;
+}
+
+/* Scorecard container & cards for Country Explorer */
+.scorecards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+  gap: 14px;
+  margin-bottom: 1.25rem;
+  width: 100%;
+}
+
+.scorecard-item {
+  background: #ffffff;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 14px 16px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.scorecard-item:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.08);
+}
+
+.scorecard-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.scorecard-country {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #1e293b;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.scorecard-val {
+  font-size: 1.95rem;
+  font-weight: 800;
+  line-height: 1.1;
+  color: #0f172a;
+  margin-bottom: 4px;
+}
+
+.scorecard-meta {
+  font-size: 0.82rem;
+  color: #64748b;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.scorecard-delta {
+  font-weight: 700;
+}
+
+.delta-up {
+  color: #d97706; /* Elevated wage pressure */
+}
+
+.delta-down {
+  color: #059669; /* Easing wage pressure */
+}
+
+.delta-neutral {
+  color: #64748b;
+}
+
+.status-badge {
+  display: inline-block;
+  padding: 3px 8px;
+  border-radius: 12px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.status-very-high {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.status-high {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.status-moderate {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.status-subdued {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+/* Country Selector Component (Looker Studio Bar Style) */
+#country-explorer > .bslib-grid > div:first-child .card,
+#country-explorer .card:has(.country-filter-card) {
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  overflow: visible !important;
+  height: 100% !important;
+  margin-bottom: 0 !important;
+}
+
+#country-explorer > .bslib-grid > div:first-child .card-body,
+#country-explorer .card:has(.country-filter-card) .card-body {
+  padding: 0 !important;
+  overflow: visible !important;
+  height: 100% !important;
+}
+
+#country-explorer > .bslib-grid > div:first-child .cell-output-display,
+#country-explorer .cell-output-display:has(.country-filter-card) {
+  overflow: visible !important;
+  height: 100% !important;
+}
+
+#country-explorer > .bslib-grid > div:first-child .bslib-full-screen-enter,
+#country-explorer .card:has(.country-filter-card) .bslib-full-screen-enter {
+  display: none !important;
+}
+
+.country-filter-card {
+  background-color: #f1f5f9;
+  border: 1.5px solid #cbd5e1;
+  border-radius: 10px;
+  padding: 18px 26px;
+  margin-bottom: 0;
+  min-height: 85px;
+  height: 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  overflow: visible !important;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+}
+
+.country-filter-content {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+  width: 100%;
+}
+
+.country-filter-label {
+  font-weight: 700;
+  font-size: 1.05rem;
+  color: #1e293b;
+  margin-bottom: 0;
+  line-height: 1.4;
+}
+
+.country-select-box-wrapper {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.country-select-prefix {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: #64748b;
+}
+
+.country-native-select {
+  display: inline-block;
+  width: auto;
+  min-width: 250px;
+  max-width: 350px;
+  padding: 9px 18px;
+  font-size: 1.0rem;
+  font-weight: 600;
+  color: #1e293b;
+  background-color: #ffffff;
+  border: 1.5px solid #94a3b8;
+  border-radius: 8px;
+  cursor: pointer;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.country-native-select:focus {
+  border-color: #fec44f;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(254, 196, 79, 0.3);
+}
+
+/* Custom HTML Legends */
+.custom-legend-container {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 8px 14px;
+  background-color: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 6px;
+  margin-bottom: 12px;
+}
+
+.custom-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #334155;
+}
+
+.legend-swatch-line {
+  display: inline-block;
+  width: 22px;
+  height: 3.5px;
+  border-radius: 2px;
+}
+
+/* DataTables looker studio header styling */
+.dataTables_wrapper {
+  width: 100% !important;
+  margin-top: 8px;
+}
+
+table.dataTable {
+  border-collapse: collapse !important;
+  width: 100% !important;
+}
+
+table.dataTable thead th {
+  background-color: #fec44f !important;
+  color: #111111 !important;
+  font-weight: 700 !important;
+  border-bottom: 2px solid #d49b00 !important;
+  padding: 10px 12px !important;
+  font-size: 0.92rem !important;
+}
+
+table.dataTable tbody td {
+  padding: 8px 12px !important;
+  font-size: 0.9rem !important;
+  border-bottom: 1px solid #f1f5f9 !important;
+  color: #212529 !important;
+}
+
+table.dataTable tbody tr:hover {
+  background-color: #f8fafc !important;
+}
+
+/* CSV export button under charts */
+.chart-export-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  width: 100%;
+  padding-top: 6px;
+  margin-top: 4px;
+  margin-bottom: 2px;
+}
+
+.btn-export-chart-csv {
+  position: static !important;
+  background-color: #ffffff;
+  border: 1px solid #d1d5db;
+  color: #374151;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 6px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.06);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  transition: all 0.15s ease-in-out;
+  opacity: 0.9;
+}
+
+.btn-export-chart-csv:hover {
+  background-color: #f3f4f6;
+  border-color: #9ca3af;
+  color: #111827;
+  opacity: 1;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.12);
+}
+
+.btn-export-chart-csv:active {
+  transform: scale(0.96);
+}
+
+.btn-export-chart-csv svg {
+  width: 13px;
+  height: 13px;
+  fill: currentColor;
+}
+
+/* Methodology card typography and layout */
+.methodology-card {
+  line-height: 1.7;
+  font-size: 0.96rem;
+  color: #1e293b;
+  overflow: visible !important;
+}
+
+.methodology-card h4 {
+  font-weight: 700;
+  color: #0f172a;
+  margin-bottom: 1.1rem;
+}
+
+.methodology-card ol > li {
+  margin-bottom: 14px;
+  font-weight: 600;
+  color: #0f172a;
+}
+
+.methodology-card ul {
+  font-weight: 400;
+  color: #334155;
+  margin-top: 6px;
+  margin-bottom: 8px;
+}
+
+.methodology-card ul > li {
+  margin-bottom: 4px;
+}
+
+/* Desktop tab isolation (scoped strictly with .active) */
+@media (min-width: 769px) {
+  #country-explorer.active {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+}
+
+/* ========================================================================== */
+/* Mobile Responsiveness & Continuous Scroll Feed (Max Width 768px)          */
+/* Standards from .agents/skills/dashboard-standards                          */
+/* ========================================================================== */
+@media (max-width: 768px) {
+  /* Show all tab panes in continuous vertical flow on mobile */
+  .tab-content > .dashboard-page.tab-pane {
+    display: block !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+    height: auto !important;
+    min-height: auto !important;
+    overflow: visible !important;
+    margin-bottom: 2.5rem !important;
+    border-bottom: 2px solid #dee2e6 !important;
+    padding-bottom: 2rem !important;
+  }
+
+  /* Landmarks / Chapter Header Badges via CSS pseudo-elements */
+  #european-overview::before { content: "📊 European Overview"; }
+  #germany-france::before { content: "🇩🇪 🇫🇷 Germany & France"; }
+  #netherlands-italy::before { content: "🇳🇱 🇮🇹 Netherlands & Italy"; }
+  #spain-poland::before { content: "🇪🇸 🇵🇱 Spain & Poland"; }
+  #country-explorer::before { content: "🔍 Country Explorer"; }
+  #methodology-weights::before { content: "📐 Methodology & PCA Weights"; }
+
+  .dashboard-page::before {
+    display: block;
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: #111111;
+    background: #e9ecef;
+    padding: 8px 14px;
+    border-radius: 6px;
+    margin: 1.5rem 0 1rem 0;
+    border-left: 4px solid #fec44f;
+  }
+
+  /* Stacking & Card Refinements on Mobile */
+  .bslib-grid, .quarto-dashboard-row {
+    display: flex !important;
+    flex-direction: column !important;
+  }
+
+  .card {
+    min-height: 440px !important;
+    margin-bottom: 16px !important;
+    width: 100% !important;
+  }
+
+  #country-explorer .card:has(.country-filter-card),
+  #country-explorer > .bslib-grid > div:first-child .card {
+    min-height: auto !important;
+    height: auto !important;
+  }
+
+  .card-header {
+    font-size: 1.15rem !important;
+    padding: 0.75rem 1rem !important;
+    padding-right: 75px !important;
+  }
+
+  .chart-title {
+    font-size: 1rem !important;
+  }
+
+  .chart-subtitle {
+    font-size: 0.82rem !important;
+  }
+
+  .scorecards-grid {
+    grid-template-columns: repeat(2, 1fr) !important;
+    gap: 8px !important;
+  }
+
+  .scorecard-item {
+    padding: 10px 12px !important;
+  }
+
+  .scorecard-val {
+    font-size: 1.55rem !important;
+  }
+
+  /* Prevent iOS Safari auto-zoom on input focus */
+  .country-native-select, input, select {
+    font-size: 16px !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+
+  .country-select-box-wrapper {
+    width: 100% !important;
+  }
+
+  .country-filter-content {
+    flex-direction: column !important;
+    align-items: flex-start !important;
+  }
+
+  .btn-export-chart-csv {
+    padding: 3px 8px !important;
+    font-size: 11px !important;
+  }
+
+  .dataTables_wrapper {
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+  }
+}

@@ -1,0 +1,12 @@
+﻿# R & Environment
+.Rhistory
+.RData
+.Rproj.user/
+
+# Quarto
+.quarto/
+
+# Local test & scratch scripts
+scratch/
+test_*.py
+*.tmp

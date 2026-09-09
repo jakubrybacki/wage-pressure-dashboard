@@ -1,0 +1,25 @@
+geo,country,term,pca_loading,var_explained_pct
+DE,Germany,Gehaltserhöhung + Lohnerhöhung,0.5739,60.77
+DE,Germany,Gehaltsverhandlung + Gehalt verhandeln,0.4772,60.77
+DE,Germany,Mindestlohn + Mindestlohn Erhöhung,0.585,60.77
+DE,Germany,Tarifverhandlung + Tariferhöhung + Tariflohn,-0.3172,60.77
+ES,Spain,convenio colectivo subida + subida salarial convenio,0.5583,71.66
+ES,Spain,revisión salarial + revalorización salarial,-0.291,71.66
+ES,Spain,subida SMI + subida salario minimo,0.5513,71.66
+ES,Spain,subida de sueldo + aumento de sueldo + subida salarial,0.5474,71.66
+FR,France,augmentation SMIC + hausse SMIC,0.4227,72.16
+FR,France,augmentation de salaire + augmentation salaire,0.5642,72.16
+FR,France,négociation salariale + NAO salaire,0.4795,72.16
+FR,France,revalorisation salariale + revalorisation salaire,0.5225,72.16
+IT,Italy,adeguamento salariale + adeguamento stipendio,0.5716,71.27
+IT,Italy,aumento stipendio + aumento di stipendio,0.573,71.27
+IT,Italy,chiedere aumento stipendio + trattativa stipendio,0.5806,71.27
+IT,Italy,rinnovo ccnl + aumenti ccnl,0.0881,71.27
+NL,Netherlands,cao loonsverhoging + cao onderhandelingen,0.5107,93.44
+NL,Netherlands,loonstijging + salarisstijging,0.4783,93.44
+NL,Netherlands,loonsverhoging + salarisverhoging,0.5101,93.44
+NL,Netherlands,minimumloon stijging + minimumloon verhoging,0.5002,93.44
+PL,Poland,podwyżka pensji + podwyżka wynagrodzenia + podwyżka płacy,0.5179,88.15
+PL,Poland,rozmowa o podwyżce + negocjacja pensji + wniosek o podwyżkę,0.5007,88.15
+PL,Poland,wzrost wynagrodzeń + wzrost płac,0.4671,88.15
+PL,Poland,zarobki + ile zarabia + kalkulator wynagrodzeń,0.5126,88.15
