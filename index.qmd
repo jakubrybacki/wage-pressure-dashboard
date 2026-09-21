@@ -198,7 +198,7 @@ earliest_date_str <- format(min(df_ind$date, na.rm = TRUE), "%Y")
 
 ```{=html}
 <script>
-  window.countryStatsData = `r if (file.exists("country_latest_stats.json")) readLines("country_latest_stats.json", warn=FALSE) else "{}"`;
+  window.countryStatsData = `r if (file.exists("country_latest_stats.json")) paste(readLines("country_latest_stats.json", warn=FALSE), collapse="\n") else "{}"`;
   window.pcaLoadingsData = `r pca_loadings_json`;
 </script>
 ```
@@ -930,32 +930,76 @@ create_country_loading_plot("FR")
 create_country_loading_plot("IT")
 ```
 
-## Row {height=580px}
+## Row {width=100%}
 
-### Technical Methodology & Analytical Framework {width=100%}
+```{=html}
+<div class="methodology-header">
+  <span>💡 <strong>Card 1: Motivation &amp; Economic Intuition — Google Trends Big Data as a Leading Wage Indicator</strong></span>
+  <span class="badge-tag">Motivation &amp; 4 Pillars</span>
+</div>
+```
 
 ::: {.card-body .methodology-card}
-#### **Methodological Framework: Synthetic Wage Pressure Tracking via Search Big Data**
+#### **Why Track Wage Pressures Using Search Query Big Data?**
 
-1. **High-Frequency Big Data Ingestion**:
-   - Monthly Google Trends query volumes spanning from **January 2004 to August 2026** for 6 major European economies: Poland (`PL`), Germany (`DE`), Spain (`ES`), Netherlands (`NL`), France (`FR`), and Italy (`IT`).
-   - For each country, 4 representative query clusters are tracked covering:
-     - Collective bargaining and union wage agreements (e.g. *Tarifverhandlung*, *convenio colectivo*, *NAO salaire*, *rinnovo CCNL*, *CAO*).
-     - Direct salary raise and negotiation searches (e.g. *podwyżka pensji*, *Gehaltserhöhung*, *aumento stipendio*).
-     - Statutory minimum wage revaluation queries (e.g. *Mindestlohn*, *SMIC*, *subida SMI*, *minimumloon*).
-     - General earnings and compensation calculators.
-
-2. **Denoising & STL Seasonal Adjustment**:
-   - High-frequency sampling noise in Google Trends data is filtered using a 3-month center moving average.
-   - Seasonal calendar variation (e.g., recurring January/Q1 minimum wage adjustments) is decomposed using **STL (Seasonal and Trend decomposition using Loess)** with adaptive seasonal windows (`s.window = 7`).
-   - The seasonally adjusted components (SA) are smoothed with a 12-month moving average (MA 12M) to extract the underlying macroeconomic wage momentum.
-
-3. **Dimensionality Reduction via Principal Component Analysis (PCA)**:
-   - For each economy, the standardized component matrix is decomposed using PCA.
-   - The **first principal component (PC1)** explains between **60.8% and 93.4%** of total variance across the countries, validating a coherent common wage-pressure factor.
-   - PC1 is oriented positively with respect to labor cost demand and min-max scaled to an intuitive **0 to 100 index scale**.
-
-4. **Data Attribution & Cloud Architecture**:
-   - Underlying analytical tables are synchronized with **Google BigQuery** (`macroeconomic-dashboards.Disinflation_dashboard`).
-   - Developed as part of the ALK Macroeconomic Dashboards initiative.
+1. **The Severe Publication Lag of National Accounts**:
+   - Official compensation indicators (such as Eurostat's **Labor Cost Index (LCI)** and national accounts compensation per employee) are published with a lag of **90 to 120 days** after the close of a quarter.
+   - By the time official statistics report an acceleration in unit labor costs, wage negotiations are already concluded and secondary price pass-through into service prices has materialized.
+2. **Behavioral Footprints of Labor Dynamics**:
+   - Google Trends query volumes provide an unprompted, high-frequency behavioral reflection of labor market tensions.
+   - When inflation erodes real household purchasing power, searches for wage renegotiation and salary raises surge. Similarly, when trade unions prepare collective bargaining rounds (*Tarifverhandlungen*, *convenios colectivos*, *rinnovi CCNL*), public search activity peaks **months before** formal wage agreements take legal effect.
+3. **Four Core Query Pillars Tracked per Economy**:
+   - **Collective Bargaining**: Searches monitoring union wage negotiations and national sector settlements.
+   - **Direct Salary Negotiation**: Searches related to requesting raises, asking for higher pay, and salary increase letters.
+   - **Statutory Minimum Wage**: Searches regarding government minimum wage revisions and mandatory revaluations.
+   - **Earnings & Take-Home Pay Calculators**: Queries evaluating net vs. gross compensation and purchasing power.
+4. **Synthetic Leading Indicator**:
+   - Extracting the common latent driver across these four pillars creates a real-time, forward-looking barometer of structural wage pressure across European economies.
 :::
+
+## Row {width=100%}
+
+```{=html}
+<div class="methodology-header">
+  <span>📐 <strong>Card 2: Econometric Pipeline — Loess STL, PCA Factor Extraction &amp; Index Normalization (0–100)</strong></span>
+  <span class="badge-tag">Econometric Model</span>
+</div>
+```
+
+::: {.card-body .methodology-card}
+#### **Statistical Methodology and Latent Factor Extraction**
+
+Let $Y_{i,c,t}$ represent the raw Google Trends search volume index for term $i \in \{1, \dots, p\}$ in country $c$ at month $t$.
+
+1. **Sampling Denoising**: High-frequency sampling jitter is filtered using a 3-month center moving average:
+
+$$\tilde{Y}_{i,c,t} = \frac{1}{4} Y_{i,c,t-1} + \frac{1}{2} Y_{i,c,t} + \frac{1}{4} Y_{i,c,t+1}$$
+
+2. **Adaptive Seasonal Adjustment (STL)**: Decomposed into trend ($T$), seasonal ($S$), and remainder ($R$) components using Loess with seasonal window $s.\text{window} = 7$:
+
+$$\tilde{Y}_{i,c,t} = T_{i,c,t} + S_{i,c,t} + R_{i,c,t} \implies Y^{\text{SA}}_{i,c,t} = \tilde{Y}_{i,c,t} - S_{i,c,t}$$
+
+3. **Standardization (Z-Score)**: Each seasonally adjusted component is standardized to zero mean and unit variance:
+
+$$Z_{i,c,t} = \frac{Y^{\text{SA}}_{i,c,t} - \mu_{i,c}}{\sigma_{i,c}}, \quad \mathbf{Z}_c \in \mathbb{R}^{T \times p}$$
+
+4. **Principal Component Analysis (PCA)**: The empirical covariance matrix $\boldsymbol{\Sigma}_c = \frac{1}{T-1} \mathbf{Z}_c^T \mathbf{Z}_c$ is decomposed:
+
+$$\boldsymbol{\Sigma}_c \mathbf{v}_1 = \lambda_1 \mathbf{v}_1$$
+
+where $\lambda_1$ is the largest eigenvalue and $\mathbf{v}_1 = [v_{1,1}, \dots, v_{1,p}]^T$ is the first eigenvector (factor loadings). The variance explained ratio confirms the validity of a unified wage-pressure factor ($60.8\% - 93.4\%$ across EU countries):
+
+$$\operatorname{VarExplained}_c = \frac{\lambda_1}{\sum_{j=1}^p \lambda_j} \times 100\%$$
+
+5. **Factor Projection & Min-Max Index Normalization (0–100 Scale)**:
+
+$$\operatorname{PC1}_{c,t} = \operatorname{sgn}\left(\sum_{j=1}^p v_{1,j}\right) \cdot \mathbf{Z}_{c,t} \mathbf{v}_1$$
+
+$$I_{c,t} = 100 \times \left( \frac{\operatorname{PC1}_{c,t} - \min_\tau \operatorname{PC1}_{c,\tau}}{\max_\tau \operatorname{PC1}_{c,\tau} - \min_\tau \operatorname{PC1}_{c,\tau}} \right)$$
+
+6. **Momentum (MA 3M) and Structural Trend (MA 12M)**:
+
+$$\text{Momentum}_{c,t} = \frac{1}{3}\sum_{k=0}^2 I_{c,t-k}, \quad \text{Trend}_{c,t} = \frac{1}{12}\sum_{k=0}^{11} I_{c,t-k}$$
+:::
+
+

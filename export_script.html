@@ -276,3 +276,50 @@
   setInterval(initExportButtons, 1500);
 })();
 </script>
+
+<script>
+window.MathJax = {
+  startup: {
+    typeset: false,
+    ready: function() {}
+  }
+};
+</script>
+
+<!-- KaTeX for high-performance LaTeX formula rendering -->
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+<script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+<script>
+function renderAllLatexMath() {
+  if (typeof renderMathInElement === 'function') {
+    renderMathInElement(document.body, {
+      delimiters: [
+        {left: '$$', right: '$$', display: true},
+        {left: '\\[', right: '\\]', display: true},
+        {left: '$', right: '$', display: false},
+        {left: '\\(', right: '\\)', display: false}
+      ],
+      ignoredTags: ['script', 'noscript', 'style', 'textarea', 'pre', 'code'],
+      throwOnError: false
+    });
+  }
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  setTimeout(renderAllLatexMath, 80);
+  setTimeout(renderAllLatexMath, 350);
+  setTimeout(renderAllLatexMath, 900);
+
+  const navTabs = document.querySelectorAll('.navbar-nav .nav-link, a[data-bs-toggle="tab"]');
+  navTabs.forEach(function(tab) {
+    tab.addEventListener('click', function() {
+      setTimeout(renderAllLatexMath, 120);
+    });
+    tab.addEventListener('shown.bs.tab', function() {
+      setTimeout(renderAllLatexMath, 80);
+    });
+  });
+});
+</script>
+
